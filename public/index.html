@@ -90,18 +90,33 @@ function mostrarJaAvaliou(titulo) {
 
 const IDS = { anel: "anel", pct: "pct", rot: "rot", total: "total", tabela: "tabela" };
 
+let intervaloMin = 60, timer = null, ultima = 0;
+function agendar() {
+  clearTimeout(timer);
+  timer = setTimeout(carregar, intervaloMin * 60000);
+}
+
 async function carregar() {
   try {
     const d = await api("/resumo?id=" + encodeURIComponent(deviceId()));
     document.getElementById("nome").textContent = d.nome;
     document.title = "Avalie " + d.nome;
+    intervaloMin = d.intervaloMin || 60;
+    ultima = Date.now();
     pintarResumo(d, IDS);
     if (d.jaAvaliou) mostrarJaAvaliou("Você já avaliou hoje. Obrigado!");
     else if (document.getElementById("bloco-ok").hidden) document.getElementById("bloco-form").hidden = false;
   } catch (e) {
-    document.getElementById("rot").textContent = "Não foi possível carregar. Verifique sua conexão.";
+    if (!ultima) document.getElementById("rot").textContent = "Não foi possível carregar. Verifique sua conexão.";
+  } finally {
+    agendar();
   }
 }
+
+// ao voltar para a aba/app, atualiza só se já passou o intervalo
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden && Date.now() - ultima > intervaloMin * 60000) carregar();
+});
 
 btn.addEventListener("click", async () => {
   const erro = document.getElementById("erro");
@@ -112,6 +127,7 @@ btn.addEventListener("click", async () => {
   for (const c of CRITERIOS) corpo[c] = Number(document.getElementById("s-" + c).value);
   try {
     const d = await api("/avaliar", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(corpo) });
+    ultima = Date.now();
     pintarResumo(d, IDS);
     mostrarJaAvaliou("Obrigado pela sua avaliação!");
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -124,7 +140,6 @@ btn.addEventListener("click", async () => {
 
 montarForm();
 carregar();
-setInterval(carregar, 8000); // atualiza o resultado em tempo real
 </script>
 </body>
 </html>

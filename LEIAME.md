@@ -13,4 +13,6 @@ Páginas:
 4. Faça um novo deploy (Deploys → Trigger deploy) para a senha valer.
 5. Abra `https://SEU-SITE.netlify.app/admin/`, entre com a senha e baixe o cartaz com o QR Code.
 
+Frequência de atualização: padrão 1 hora; o ADM ajusta de 15 min a 24 h no painel.
+
 Observação: arrastar a pasta no "Netlify Drop" NÃO funciona, pois o app usa função de servidor (API) e banco (Netlify Blobs).

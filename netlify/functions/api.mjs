@@ -17,6 +17,14 @@ const S = (name) => getStore({ name, consistency: "strong" });
 const somaVazia = () => ({ atendimento: 0, preco: 0, ambiente: 0 });
 const vazio = () => ({ total: 0, soma: somaVazia(), dias: {} });
 
+// intervalo de atualização (minutos): padrão 1 hora, ajustável pelo ADM entre 15 min e 24 h
+const INTERVALO_PADRAO = 60, INTERVALO_MIN = 15, INTERVALO_MAX = 1440;
+async function lerIntervalo() {
+  const c = await S("dados").get("config", { type: "json" });
+  const v = Number(c && c.intervaloMin);
+  return Number.isInteger(v) && v >= INTERVALO_MIN && v <= INTERVALO_MAX ? v : INTERVALO_PADRAO;
+}
+
 function resumir(a) {
   const n = a.total;
   const medias = {};
@@ -58,7 +66,12 @@ export default async (req) => {
     if (rota === "/resumo" && req.method === "GET") {
       const ag = (await S("dados").get("agregado", { type: "json" })) || vazio();
       const ids = [url.searchParams.get("id"), lerCookie(req, "dev_id")].filter(idValido);
-      return resp({ nome: nomeLoja(), ...resumir(ag), jaAvaliou: await jaAvaliou(ids, hoje()) });
+      return resp({
+        nome: nomeLoja(),
+        ...resumir(ag),
+        jaAvaliou: await jaAvaliou(ids, hoje()),
+        intervaloMin: await lerIntervalo(),
+      });
     }
 
     // ---------- Público: enviar avaliação ----------
@@ -128,7 +141,27 @@ export default async (req) => {
       const chaves = blobs.map((x) => x.key).sort().slice(-100).reverse();
       const ultimas = (await Promise.all(chaves.map((k) => store.get(k, { type: "json" })))).filter(Boolean);
 
-      return resp({ nome: nomeLoja(), ...resumir(ag), dias, ultimas });
+      return resp({ nome: nomeLoja(), ...resumir(ag), dias, ultimas, intervaloMin: await lerIntervalo() });
+    }
+
+    // ---------- ADM: ajustar intervalo de atualização ----------
+    if (rota === "/admin/config" && req.method === "POST") {
+      const auth = autorizado(req);
+      if (auth === "sem-senha")
+        return resp({ erro: "Configure a variável ADMIN_PASSWORD no Netlify e faça um novo deploy." }, 500);
+      if (!auth) return resp({ erro: "Senha incorreta." }, 401);
+
+      let b;
+      try {
+        b = await req.json();
+      } catch {
+        return resp({ erro: "Requisição inválida." }, 400);
+      }
+      const v = Number(b.intervaloMin);
+      if (!Number.isInteger(v) || v < INTERVALO_MIN || v > INTERVALO_MAX)
+        return resp({ erro: "Escolha um intervalo entre 15 minutos e 24 horas." }, 400);
+      await S("dados").setJSON("config", { intervaloMin: v });
+      return resp({ ok: true, intervaloMin: v });
     }
 
     return resp({ erro: "Não encontrado." }, 404);

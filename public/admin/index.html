@@ -26,8 +26,8 @@
   <!-- Painel -->
   <div id="painel" style="display:none;flex-direction:column;gap:22px">
     <div class="topo-adm">
-      <div><h1 id="nome" style="text-align:left">Painel</h1><p class="sub" style="text-align:left">Resultados em tempo real</p></div>
-      <button class="btn neutro pequeno" id="sair">Sair</button>
+      <div><h1 id="nome" style="text-align:left">Painel</h1><p class="sub" style="text-align:left" id="status-atualizacao">Resultados</p></div>
+      <div class="linha" style="flex:0 0 auto;flex-wrap:nowrap"><button class="btn neutro pequeno" id="atualizar">Atualizar agora</button><button class="btn neutro pequeno" id="sair">Sair</button></div>
     </div>
 
     <section class="card">
@@ -35,6 +35,14 @@
       <p class="rot" id="rot"></p>
       <p class="sub" id="total"></p>
       <table class="tabela" id="tabela"></table>
+    </section>
+
+    <section class="card">
+      <h2>Frequência de atualização</h2>
+      <p class="sub" style="margin:-6px 0 14px;text-align:left">Define de quanto em quanto tempo a tela dos clientes e este painel buscam os resultados novos. Intervalos maiores gastam menos créditos do Netlify. Quem acabou de avaliar vê o resultado na hora.</p>
+      <select id="intervalo" aria-label="Intervalo de atualização"></select>
+      <button class="btn" id="salvar-intervalo">Salvar frequência</button>
+      <p class="msg" id="msg-intervalo" role="status"></p>
     </section>
 
     <section class="card">
@@ -85,6 +93,27 @@ let formato = "feed";
 let timer = null;
 const $ = (id) => document.getElementById(id);
 
+function textoIntervalo(min) {
+  if (min < 60) return min + " minutos";
+  const h = min / 60;
+  return Number.isInteger(h) ? (h === 1 ? "1 hora" : h + " horas") : min + " minutos";
+}
+function montarIntervalos() {
+  const base = [15, 30, 60, 120, 180, 360, 720, 1440];
+  if (dados && !base.includes(dados.intervaloMin)) base.push(dados.intervaloMin);
+  base.sort((a, b) => a - b);
+  $("intervalo").innerHTML = base.map((m) => `<option value="${m}">A cada ${textoIntervalo(m)}${m === 60 ? " (padrão)" : ""}</option>`).join("");
+  $("intervalo").value = dados.intervaloMin;
+}
+async function atualizar() {
+  try { dados = await buscar(); pintar(); } catch (e) { if (e.status === 401) sair(); return; }
+  agendar();
+}
+function agendar() {
+  clearTimeout(timer);
+  timer = setTimeout(atualizar, (dados.intervaloMin || 60) * 60000);
+}
+
 /* ---------- Login ---------- */
 async function buscar() {
   return api("/admin/dados", { headers: { "x-admin-key": chave } });
@@ -103,7 +132,7 @@ async function entrar() {
 function sair() {
   sessionStorage.removeItem("adm");
   chave = "";
-  clearInterval(timer);
+  clearTimeout(timer);
   $("painel").style.display = "none";
   $("login").hidden = false;
 }
@@ -116,12 +145,25 @@ function abrirPainel() {
   $("painel").style.display = "flex";
   $("link-qr").value = location.origin + "/";
   desenharQR();
+  montarIntervalos();
   pintar();
-  clearInterval(timer);
-  timer = setInterval(async () => {
-    try { dados = await buscar(); pintar(); } catch (e) { if (e.status === 401) sair(); }
-  }, 10000);
+  agendar();
 }
+
+$("atualizar").onclick = atualizar;
+$("salvar-intervalo").onclick = async () => {
+  const msg = $("msg-intervalo");
+  msg.className = "msg"; msg.textContent = "Salvando…";
+  try {
+    const r = await api("/admin/config", { method: "POST", headers: { "content-type": "application/json", "x-admin-key": chave }, body: JSON.stringify({ intervaloMin: Number($("intervalo").value) }) });
+    dados.intervaloMin = r.intervaloMin;
+    msg.textContent = "Salvo. Atualização a cada " + textoIntervalo(r.intervaloMin) + ".";
+    agendar();
+    pintar();
+  } catch (e) {
+    msg.className = "msg erro"; msg.textContent = e.message;
+  }
+};
 
 /* ---------- Painel ---------- */
 function dataHora(iso) {
@@ -129,6 +171,7 @@ function dataHora(iso) {
 }
 function pintar() {
   $("nome").textContent = dados.nome;
+  $("status-atualizacao").textContent = "Atualizado às " + new Date().toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }) + " · próxima atualização automática em " + textoIntervalo(dados.intervaloMin);
   pintarResumo(dados, { anel: "anel", pct: "pct", rot: "rot", total: "total", tabela: "tabela" });
 
   $("ultimas").innerHTML = dados.ultimas.length
