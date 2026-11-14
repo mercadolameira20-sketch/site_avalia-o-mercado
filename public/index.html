@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#ffffff">
+<title>Avalie nossa loja</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/estilo.css">
+</head>
+<body>
+<main class="app">
+  <header>
+    <h1 id="nome">Avalie nossa loja</h1>
+    <p class="sub">Sua opinião ajuda a melhorar o nosso atendimento</p>
+  </header>
+
+  <section class="card" aria-live="polite">
+    <div class="anel" id="anel"><b id="pct">–</b></div>
+    <p class="rot" id="rot">Carregando…</p>
+    <p class="sub" id="total"></p>
+    <table class="tabela" id="tabela"></table>
+  </section>
+
+  <section id="bloco-form" hidden>
+    <div id="criterios" style="display:flex;flex-direction:column;gap:18px"></div>
+    <div style="margin-top:22px">
+      <button class="btn" id="confirmar" disabled>Avalie as 3 opções (0/3)</button>
+      <p class="msg erro" id="erro" role="alert"></p>
+    </div>
+  </section>
+
+  <section class="card" id="bloco-ok" hidden>
+    <p class="ok-titulo" id="ok-titulo">Obrigado pela sua avaliação!</p>
+    <p class="sub" style="margin-top:0">Cada cliente avalia uma vez por dia. Você pode avaliar de novo amanhã.</p>
+  </section>
+</main>
+
+<script src="/comum.js"></script>
+<script>
+const DESC = {
+  atendimento: "Como foi o atendimento da nossa equipe?",
+  preco: "O que achou dos nossos preços?",
+  ambiente: "Limpeza, organização e conforto da loja",
+};
+const tocados = new Set();
+const btn = document.getElementById("confirmar");
+
+function montarForm() {
+  document.getElementById("criterios").innerHTML = CRITERIOS.map((c) => `
+    <div class="card crit" data-c="${c}">
+      <div class="topo">
+        <div><div class="titulo">${NOMES[c]}</div><p class="desc">${DESC[c]}</p></div>
+        <div class="valor" id="v-${c}">50%<small>Bom</small></div>
+      </div>
+      <input class="slider" type="range" min="0" max="100" step="1" value="50" id="s-${c}" aria-label="${NOMES[c]}">
+      <div class="escala"><span>0% · negativa</span><span>100% · positiva</span></div>
+    </div>`).join("");
+
+  for (const c of CRITERIOS) {
+    const s = document.getElementById("s-" + c);
+    const atualizar = () => {
+      const v = Number(s.value);
+      s.style.setProperty("--c", cor(v));
+      const el = document.getElementById("v-" + c);
+      el.style.color = cor(v);
+      el.innerHTML = `${v}%<small>${rotulo(v)}</small>`;
+    };
+    const marcar = () => { tocados.add(c); estadoBotao(); };
+    s.addEventListener("input", () => { atualizar(); marcar(); });
+    s.addEventListener("pointerup", marcar);
+    s.addEventListener("keydown", marcar);
+    atualizar();
+  }
+}
+
+function estadoBotao() {
+  const n = tocados.size;
+  btn.disabled = n < CRITERIOS.length;
+  btn.textContent = n < CRITERIOS.length ? `Avalie as 3 opções (${n}/3)` : "Confirmar avaliação";
+}
+
+function mostrarJaAvaliou(titulo) {
+  document.getElementById("bloco-form").hidden = true;
+  document.getElementById("bloco-ok").hidden = false;
+  if (titulo) document.getElementById("ok-titulo").textContent = titulo;
+}
+
+const IDS = { anel: "anel", pct: "pct", rot: "rot", total: "total", tabela: "tabela" };
+
+async function carregar() {
+  try {
+    const d = await api("/resumo?id=" + encodeURIComponent(deviceId()));
+    document.getElementById("nome").textContent = d.nome;
+    document.title = "Avalie " + d.nome;
+    pintarResumo(d, IDS);
+    if (d.jaAvaliou) mostrarJaAvaliou("Você já avaliou hoje. Obrigado!");
+    else if (document.getElementById("bloco-ok").hidden) document.getElementById("bloco-form").hidden = false;
+  } catch (e) {
+    document.getElementById("rot").textContent = "Não foi possível carregar. Verifique sua conexão.";
+  }
+}
+
+btn.addEventListener("click", async () => {
+  const erro = document.getElementById("erro");
+  erro.textContent = "";
+  btn.disabled = true;
+  btn.textContent = "Enviando…";
+  const corpo = { id: deviceId() };
+  for (const c of CRITERIOS) corpo[c] = Number(document.getElementById("s-" + c).value);
+  try {
+    const d = await api("/avaliar", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(corpo) });
+    pintarResumo(d, IDS);
+    mostrarJaAvaliou("Obrigado pela sua avaliação!");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  } catch (e) {
+    erro.textContent = e.message;
+    if (e.status === 409) mostrarJaAvaliou("Você já avaliou hoje. Obrigado!");
+    else { btn.disabled = false; btn.textContent = "Confirmar avaliação"; }
+  }
+});
+
+montarForm();
+carregar();
+setInterval(carregar, 8000); // atualiza o resultado em tempo real
+</script>
+</body>
+</html>

@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#ffffff">
+<meta name="robots" content="noindex, nofollow">
+<title>Painel do administrador</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Nunito:wght@600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/estilo.css">
+</head>
+<body>
+<main class="app largo">
+
+  <!-- Login -->
+  <section id="login" class="card" style="margin-top:12vh">
+    <h1>Painel do administrador</h1>
+    <p class="sub" style="margin-bottom:20px">Digite a senha para ver os detalhes</p>
+    <input type="password" id="senha" placeholder="Senha" autocomplete="current-password">
+    <button class="btn" id="entrar">Entrar</button>
+    <p class="msg erro" id="erro-login" role="alert"></p>
+  </section>
+
+  <!-- Painel -->
+  <div id="painel" style="display:none;flex-direction:column;gap:22px">
+    <div class="topo-adm">
+      <div><h1 id="nome" style="text-align:left">Painel</h1><p class="sub" style="text-align:left">Resultados em tempo real</p></div>
+      <button class="btn neutro pequeno" id="sair">Sair</button>
+    </div>
+
+    <section class="card">
+      <div class="anel" id="anel"><b id="pct">–</b></div>
+      <p class="rot" id="rot"></p>
+      <p class="sub" id="total"></p>
+      <table class="tabela" id="tabela"></table>
+    </section>
+
+    <section class="card">
+      <h2>Compartilhar nas redes sociais</h2>
+      <div class="seg" role="tablist">
+        <button class="ativo" data-f="feed" role="tab">Feed (4:5)</button>
+        <button data-f="story" role="tab">Status / Story (9:16)</button>
+      </div>
+      <canvas id="previa" class="previa"></canvas>
+      <div class="linha">
+        <button class="btn" id="compartilhar">Compartilhar imagem</button>
+        <button class="btn neutro" id="baixar">Baixar PNG</button>
+      </div>
+      <p class="sub" id="aviso-share"></p>
+    </section>
+
+    <section class="card">
+      <h2>Média por dia</h2>
+      <div class="scroll"><svg id="grafico" width="100%" height="190" role="img" aria-label="Média geral por dia"></svg></div>
+    </section>
+
+    <section class="card">
+      <h2>Últimas avaliações</h2>
+      <div class="scroll">
+        <table class="lista">
+          <thead><tr><th>Data e hora</th><th>Atendimento</th><th>Preço</th><th>Ambiente</th><th>Geral</th></tr></thead>
+          <tbody id="ultimas"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>QR Code para a loja</h2>
+      <p class="sub" style="margin:-6px 0 14px">Imprima e deixe em um lugar visível. O link abre a página dos clientes.</p>
+      <input type="text" id="link-qr" aria-label="Endereço do site">
+      <div id="qr"></div>
+      <button class="btn neutro" id="baixar-qr">Baixar cartaz com QR Code</button>
+    </section>
+  </div>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="/comum.js"></script>
+<script>
+let chave = sessionStorage.getItem("adm") || "";
+let dados = null;
+let formato = "feed";
+let timer = null;
+const $ = (id) => document.getElementById(id);
+
+/* ---------- Login ---------- */
+async function buscar() {
+  return api("/admin/dados", { headers: { "x-admin-key": chave } });
+}
+async function entrar() {
+  $("erro-login").textContent = "";
+  chave = $("senha").value;
+  try {
+    dados = await buscar();
+    sessionStorage.setItem("adm", chave);
+    abrirPainel();
+  } catch (e) {
+    $("erro-login").textContent = e.message;
+  }
+}
+function sair() {
+  sessionStorage.removeItem("adm");
+  chave = "";
+  clearInterval(timer);
+  $("painel").style.display = "none";
+  $("login").hidden = false;
+}
+$("entrar").onclick = entrar;
+$("senha").addEventListener("keydown", (e) => e.key === "Enter" && entrar());
+$("sair").onclick = sair;
+
+function abrirPainel() {
+  $("login").hidden = true;
+  $("painel").style.display = "flex";
+  $("link-qr").value = location.origin + "/";
+  desenharQR();
+  pintar();
+  clearInterval(timer);
+  timer = setInterval(async () => {
+    try { dados = await buscar(); pintar(); } catch (e) { if (e.status === 401) sair(); }
+  }, 10000);
+}
+
+/* ---------- Painel ---------- */
+function dataHora(iso) {
+  return new Date(iso).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+}
+function pintar() {
+  $("nome").textContent = dados.nome;
+  pintarResumo(dados, { anel: "anel", pct: "pct", rot: "rot", total: "total", tabela: "tabela" });
+
+  $("ultimas").innerHTML = dados.ultimas.length
+    ? dados.ultimas.map((a) => {
+        const g = (a.atendimento + a.preco + a.ambiente) / 3;
+        const cel = (v) => `<td style="color:${cor(v)}">${v}%</td>`;
+        return `<tr><td>${dataHora(a.ts)}</td>${cel(a.atendimento)}${cel(a.preco)}${cel(a.ambiente)}${cel(Math.round(g))}</tr>`;
+      }).join("")
+    : `<tr><td colspan="5" style="color:var(--muted)">Nenhuma avaliação ainda.</td></tr>`;
+
+  graficoDias();
+  desenharImagem($("previa"), formato);
+}
+
+function graficoDias() {
+  const svg = $("grafico");
+  const dias = dados.dias;
+  if (!dias.length) { svg.innerHTML = `<text x="0" y="40" fill="#8a94a0" font-family="Nunito,sans-serif" font-size="14">Sem dados ainda.</text>`; return; }
+  const larg = Math.max(dias.length * 56, 320), alt = 190, base = 150;
+  svg.setAttribute("viewBox", `0 0 ${larg} ${alt}`);
+  svg.setAttribute("width", larg);
+  svg.innerHTML = dias.map((d, i) => {
+    const h = (d.geral / 100) * 120;
+    const x = i * 56 + 10;
+    const [, m, dd] = d.dia.split("-");
+    return `<rect x="${x}" y="${base - 120}" width="36" height="120" rx="12" fill="#eceff3"/>
+      <rect x="${x}" y="${base - h}" width="36" height="${h}" rx="12" fill="${cor(d.geral)}"/>
+      <text x="${x + 18}" y="${base - h - 8}" text-anchor="middle" font-family="Nunito,sans-serif" font-weight="800" font-size="12" fill="#1f2933">${pct(d.geral)}</text>
+      <text x="${x + 18}" y="172" text-anchor="middle" font-family="Nunito,sans-serif" font-size="12" fill="#8a94a0">${dd}/${m}</text>
+      <text x="${x + 18}" y="186" text-anchor="middle" font-family="Nunito,sans-serif" font-size="10" fill="#b4bcc5">${d.total} av.</text>`;
+  }).join("");
+}
+
+/* ---------- Imagem para redes sociais ---------- */
+function retanguloRedondo(c, x, y, w, h, r) {
+  c.beginPath(); c.moveTo(x + r, y);
+  c.arcTo(x + w, y, x + w, y + h, r); c.arcTo(x + w, y + h, x, y + h, r);
+  c.arcTo(x, y + h, x, y, r); c.arcTo(x, y, x + w, y, r); c.closePath();
+}
+function desenharImagem(canvas, f) {
+  const W = 1080, H = f === "story" ? 1920 : 1350;
+  canvas.width = W; canvas.height = H;
+  const c = canvas.getContext("2d");
+  const F = (peso, px) => `${peso} ${px}px Nunito, system-ui, sans-serif`;
+  c.fillStyle = "#fff"; c.fillRect(0, 0, W, H);
+  c.textAlign = "center"; c.textBaseline = "alphabetic";
+
+  const topo = f === "story" ? 250 : 80;
+  c.fillStyle = "#1f2933"; c.font = F(800, 66); c.fillText(dados.nome, W / 2, topo + 70);
+  c.fillStyle = "#8a94a0"; c.font = F(600, 36); c.fillText("O que os nossos clientes dizem", W / 2, topo + 126);
+
+  // anel
+  const cx = W / 2, cy = topo + 400, R = 190, lw = 46, g = dados.geral;
+  c.save(); c.shadowColor = "rgba(31,41,51,.20)"; c.shadowBlur = 50; c.shadowOffsetY = 20;
+  c.beginPath(); c.arc(cx, cy, R + lw / 2, 0, Math.PI * 2); c.fillStyle = "#fff"; c.fill(); c.restore();
+  c.lineWidth = lw; c.lineCap = "round"; c.strokeStyle = "#eceff3";
+  c.beginPath(); c.arc(cx, cy, R, 0, Math.PI * 2); c.stroke();
+  if (g != null && g >= 1) {
+    c.strokeStyle = cor(g); c.beginPath();
+    c.arc(cx, cy, R, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * (g / 100)); c.stroke();
+  }
+  c.fillStyle = "#1f2933"; c.font = F(800, 120); c.textBaseline = "middle"; c.fillText(pct(g), cx, cy - 12);
+  c.textBaseline = "alphabetic";
+  c.fillStyle = g == null ? "#8a94a0" : cor(g); c.font = F(800, 46);
+  c.fillText(g == null ? "Sem avaliações" : rotulo(g), cx, cy + R + lw + 62);
+
+  // tabela
+  const ty = cy + R + lw + 130, linha = f === "story" ? 150 : 120, alturaCard = linha * 3 + 50;
+  c.save(); c.shadowColor = "rgba(31,41,51,.14)"; c.shadowBlur = 40; c.shadowOffsetY = 14;
+  retanguloRedondo(c, 70, ty, W - 140, alturaCard, 44); c.fillStyle = "#fff"; c.fill(); c.restore();
+  CRITERIOS.forEach((k, i) => {
+    const y = ty + 40 + i * linha, m = dados.medias[k];
+    c.textAlign = "left"; c.fillStyle = "#1f2933"; c.font = F(800, 40); c.fillText(NOMES[k], 120, y + 50);
+    c.textAlign = "right"; c.fillStyle = m == null ? "#8a94a0" : cor(m); c.fillText(pct(m), W - 120, y + 50);
+    retanguloRedondo(c, 120, y + 68, W - 240, 24, 12); c.fillStyle = "#eceff3"; c.fill();
+    if (m != null && m > 0) { retanguloRedondo(c, 120, y + 68, Math.max(24, (W - 240) * m / 100), 24, 12); c.fillStyle = cor(m); c.fill(); }
+  });
+
+  // rodapé
+  c.textAlign = "center"; c.fillStyle = "#8a94a0"; c.font = F(600, 32);
+  const quando = new Date().toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+  const rodY = ty + alturaCard + (f === "story" ? 110 : 80);
+  c.fillText(`Baseado em ${dados.total} ${dados.total === 1 ? "avaliação" : "avaliações"}`, W / 2, rodY);
+  c.font = F(600, 28); c.fillText(`Resultado em ${quando}`, W / 2, rodY + 46);
+}
+
+document.querySelectorAll(".seg button").forEach((b) => {
+  b.onclick = () => {
+    document.querySelectorAll(".seg button").forEach((x) => x.classList.remove("ativo"));
+    b.classList.add("ativo");
+    formato = b.dataset.f;
+    desenharImagem($("previa"), formato);
+  };
+});
+
+function gerarBlob() {
+  const cv = document.createElement("canvas");
+  desenharImagem(cv, formato);
+  return new Promise((ok) => cv.toBlob(ok, "image/png"));
+}
+function baixarBlob(blob, nome) {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob); a.download = nome; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+}
+$("baixar").onclick = async () => baixarBlob(await gerarBlob(), `avaliacoes-${formato}.png`);
+$("compartilhar").onclick = async () => {
+  const blob = await gerarBlob();
+  const arquivo = new File([blob], `avaliacoes-${formato}.png`, { type: "image/png" });
+  if (navigator.canShare && navigator.canShare({ files: [arquivo] })) {
+    try { await navigator.share({ files: [arquivo], title: dados.nome, text: `Avaliação dos clientes — ${dados.nome}` }); } catch (e) { /* cancelado */ }
+  } else {
+    baixarBlob(blob, arquivo.name);
+    $("aviso-share").textContent = "Este navegador não abre o menu de compartilhar. A imagem foi baixada para você postar.";
+  }
+};
+
+/* ---------- QR Code ---------- */
+function desenharQR() {
+  const alvo = $("qr");
+  alvo.innerHTML = "";
+  const texto = $("link-qr").value.trim();
+  if (!texto || typeof QRCode === "undefined") return;
+  new QRCode(alvo, { text: texto, width: 512, height: 512, correctLevel: QRCode.CorrectLevel.H });
+}
+$("link-qr").addEventListener("input", desenharQR);
+$("baixar-qr").onclick = () => {
+  const q = document.querySelector("#qr canvas");
+  if (!q) return;
+  const cv = document.createElement("canvas"); cv.width = 900; cv.height = 1200;
+  const x = cv.getContext("2d");
+  x.fillStyle = "#fff"; x.fillRect(0, 0, 900, 1200); x.textAlign = "center";
+  x.fillStyle = "#1f2933"; x.font = "800 72px Nunito, system-ui, sans-serif"; x.fillText("Avalie nossa loja", 450, 170);
+  x.fillStyle = "#8a94a0"; x.font = "600 38px Nunito, system-ui, sans-serif"; x.fillText("Aponte a câmera do celular", 450, 235);
+  x.save(); x.shadowColor = "rgba(31,41,51,.2)"; x.shadowBlur = 40; x.shadowOffsetY = 14; x.fillStyle = "#fff";
+  x.fillRect(100, 290, 700, 700); x.restore();
+  x.drawImage(q, 125, 315, 650, 650);
+  x.fillStyle = "#1f2933"; x.font = "800 46px Nunito, system-ui, sans-serif"; x.fillText(dados ? dados.nome : "", 450, 1090);
+  cv.toBlob((b) => baixarBlob(b, "cartaz-qrcode-avaliacao.png"), "image/png");
+};
+
+/* ---------- Início ---------- */
+(async () => {
+  await (document.fonts ? document.fonts.ready : Promise.resolve());
+  if (chave) {
+    try { dados = await buscar(); abrirPainel(); } catch { sair(); }
+  }
+})();
+</script>
+</body>
+</html>
